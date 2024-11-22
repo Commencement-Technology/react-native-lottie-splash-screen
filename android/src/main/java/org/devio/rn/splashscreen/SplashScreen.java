@@ -4,132 +4,208 @@ import android.animation.Animator;
 import android.app.Activity;
 import android.app.Dialog;
 import android.os.Build;
+import android.util.Log;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import androidx.annotation.StyleRes;
 import com.airbnb.lottie.LottieAnimationView;
 import java.lang.ref.WeakReference;
 
 /**
  * SplashScreen
- * 启动屏
- * from：http://www.devio.org
- * Author:CrazyCodeBoy
- * GitHub:https://github.com/crazycodeboy
- * Email:crazycodeboy@gmail.com
+ * Manages the splash screen with optional Lottie animation support and fallback mechanisms.
  */
 public class SplashScreen {
-  private static Dialog mSplashDialog;
-  private static WeakReference<Activity> mActivity;
-  private static Boolean isAnimationFinished = false;
-  private static Boolean waiting = false;
+    private static final String TAG = "SplashScreen";
 
-  /**
-   * 打开启动屏
-   */
-  public static void show(final Activity activity, final int themeResId, final int lottieId) {
-    if (activity == null)
-      return;
-    mActivity = new WeakReference<Activity>(activity);
-    activity.runOnUiThread(new Runnable() {
-      @Override
-      public void run() {
-        if (!activity.isFinishing()) {
-          mSplashDialog = new Dialog(activity, themeResId);
-          mSplashDialog.setContentView(R.layout.launch_screen);
-          mSplashDialog.setCancelable(false);
-          LottieAnimationView lottie = (LottieAnimationView) mSplashDialog.findViewById(lottieId);
+    private static Dialog mSplashDialog;
+    private static WeakReference<Activity> mActivityRef;
+    private static boolean isAnimationFinished = false;
+    private static boolean isWaitingToHide = false;
 
-          lottie.addAnimatorListener(new Animator.AnimatorListener() {
-            @Override
-            public void onAnimationStart(Animator animation) {
-              System.out.println("asdf");
+    /**
+     * Show the splash screen with a custom theme and optional Lottie animation.
+     *
+     * @param activity   The Activity where the splash screen is displayed.
+     * @param themeResId The theme resource ID for the Dialog.
+     * @param lottieId   The LottieAnimationView resource ID.
+     * @param fallbackId The ImageView or ProgressBar resource ID for fallback.
+     */
+    public static synchronized void show(final Activity activity, @StyleRes final int themeResId, final int lottieId, final int fallbackId) {
+        if (activity == null) {
+            Log.w(TAG, "Activity is null. Cannot show splash screen.");
+            return;
+        }
+
+        mActivityRef = new WeakReference<>(activity);
+
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || isActivityDestroyed(activity)) {
+                Log.w(TAG, "Activity is not valid. Cannot show splash screen.");
+                return;
             }
 
-            @Override
-            public void onAnimationEnd(Animator animation) {
-              SplashScreen.setAnimationFinished(true);
+            mSplashDialog = new Dialog(activity, themeResId);
+            mSplashDialog.setContentView(R.layout.launch_screen);
+            mSplashDialog.setCancelable(false);
+
+            boolean lottieInitialized = initializeLottie(mSplashDialog, lottieId);
+
+            // If Lottie is not initialized, fallback to an alternative.
+            if (!lottieInitialized) {
+                initializeFallback(mSplashDialog, fallbackId);
             }
 
-            @Override
-            public void onAnimationCancel(Animator animation) {}
-
-            @Override
-            public void onAnimationRepeat(Animator animation) {}
-          });
-
-          if (!mSplashDialog.isShowing()) {
-            mSplashDialog.show();
-          }
-        }
-      }
-    });
-  }
-
-  public static void setAnimationFinished(boolean flag) {
-    if (mActivity == null) {
-      return;
+            if (!mSplashDialog.isShowing()) {
+                mSplashDialog.show();
+                Log.d(TAG, "Splash screen displayed.");
+            }
+        });
     }
 
-    isAnimationFinished = flag;
-
-    final Activity _activity = mActivity.get();
-
-    _activity.runOnUiThread(new Runnable() {
-      @Override
-      public void run() {
-        if (mSplashDialog != null && mSplashDialog.isShowing()) {
-          boolean isDestroyed = false;
-
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            isDestroyed = _activity.isDestroyed();
-          }
-
-          if (!_activity.isFinishing() && !isDestroyed && waiting) {
-            mSplashDialog.dismiss();
-            mSplashDialog = null;
-          }
-        }
-      }
-    });
-  }
-
-  public static void show(final Activity activity, int lottieId) {
-    int resourceId = R.style.SplashScreen_SplashTheme;
-    show(activity, resourceId, lottieId);
-  }
-
-  /**
-   * 关闭启动屏
-   */
-  public static void hide(Activity activity) {
-    if (activity == null) {
-      if (mActivity == null) {
-        return;
-      }
-      activity = mActivity.get();
+    /**
+     * Convenience method to show the splash screen with a default theme.
+     *
+     * @param activity   The Activity where the splash screen is displayed.
+     * @param lottieId   The LottieAnimationView resource ID.
+     * @param fallbackId The ImageView or ProgressBar resource ID for fallback.
+     */
+    public static void show(final Activity activity, final int lottieId, final int fallbackId) {
+        show(activity, R.style.SplashScreen_SplashTheme, lottieId, fallbackId);
     }
 
-    if (activity == null)
-      return;
+    /**
+     * Attempt to initialize Lottie animation. Returns false if Lottie is unavailable.
+     *
+     * @param dialog    The Dialog containing the Lottie view.
+     * @param lottieId  The resource ID of the LottieAnimationView.
+     * @return True if Lottie was successfully initialized, false otherwise.
+     */
+    private static boolean initializeLottie(Dialog dialog, int lottieId) {
+        try {
+            LottieAnimationView lottieView = dialog.findViewById(lottieId);
+            if (lottieView != null) {
+                lottieView.addAnimatorListener(new Animator.AnimatorListener() {
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        Log.d(TAG, "Lottie animation started.");
+                    }
 
-    waiting = true;
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        Log.d(TAG, "Lottie animation ended.");
+                        setAnimationFinished(true);
+                    }
 
-    final Activity _activity = activity;
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        Log.d(TAG, "Lottie animation canceled.");
+                    }
 
-    _activity.runOnUiThread(new Runnable() {
-      @Override
-      public void run() {
-        if (mSplashDialog != null && mSplashDialog.isShowing()) {
-          boolean isDestroyed = false;
-
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            isDestroyed = _activity.isDestroyed();
-          }
-
-          if (!_activity.isFinishing() && !isDestroyed && isAnimationFinished) {
-            mSplashDialog.dismiss();
-            mSplashDialog = null;
-          }
+                    @Override
+                    public void onAnimationRepeat(Animator animation) {
+                        Log.d(TAG, "Lottie animation repeated.");
+                    }
+                });
+                return true;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error initializing Lottie: " + e.getMessage());
         }
-      }
-    });
-  }
+        return false;
+    }
+
+    /**
+     * Initialize a fallback for devices without Lottie support.
+     *
+     * @param dialog     The Dialog containing the fallback view.
+     * @param fallbackId The resource ID of the fallback view.
+     */
+    private static void initializeFallback(Dialog dialog, int fallbackId) {
+        try {
+            // Attempt to set a fallback view (e.g., ProgressBar or ImageView).
+            ImageView fallbackView = dialog.findViewById(fallbackId);
+            if (fallbackView != null) {
+                fallbackView.setVisibility(ImageView.VISIBLE);
+                Log.d(TAG, "Fallback image displayed.");
+                return;
+            }
+
+            ProgressBar fallbackProgressBar = dialog.findViewById(fallbackId);
+            if (fallbackProgressBar != null) {
+                fallbackProgressBar.setVisibility(ProgressBar.VISIBLE);
+                Log.d(TAG, "Fallback ProgressBar displayed.");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error initializing fallback: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Mark the animation as finished and attempt to dismiss the splash screen if waiting.
+     *
+     * @param flag True if the animation has finished.
+     */
+    private static synchronized void setAnimationFinished(boolean flag) {
+        isAnimationFinished = flag;
+        tryDismiss();
+    }
+
+    /**
+     * Hide the splash screen, dismissing the Dialog if conditions are met.
+     *
+     * @param activity The Activity where the splash screen is displayed.
+     */
+    public static synchronized void hide(Activity activity) {
+        if (activity == null) {
+            if (mActivityRef == null) {
+                Log.w(TAG, "Activity reference is null. Cannot hide splash screen.");
+                return;
+            }
+            activity = mActivityRef.get();
+        }
+
+        if (activity == null) {
+            Log.w(TAG, "Activity is null. Cannot hide splash screen.");
+            return;
+        }
+
+        isWaitingToHide = true;
+        tryDismiss();
+    }
+
+    /**
+     * Attempt to dismiss the splash screen based on the current state.
+     */
+    private static void tryDismiss() {
+        if (mSplashDialog == null || !mSplashDialog.isShowing()) {
+            return;
+        }
+
+        final Activity activity = mActivityRef != null ? mActivityRef.get() : null;
+        if (activity == null || activity.isFinishing() || isActivityDestroyed(activity)) {
+            Log.w(TAG, "Activity is not valid. Cannot dismiss splash screen.");
+            return;
+        }
+
+        if (isAnimationFinished && isWaitingToHide) {
+            activity.runOnUiThread(() -> {
+                if (mSplashDialog != null && mSplashDialog.isShowing()) {
+                    mSplashDialog.dismiss();
+                    mSplashDialog = null;
+                    Log.d(TAG, "Splash screen dismissed.");
+                }
+            });
+        }
+    }
+
+    /**
+     * Check if the activity is destroyed (for API >= 17).
+     *
+     * @param activity The Activity to check.
+     * @return True if the activity is destroyed, false otherwise.
+     */
+    private static boolean isActivityDestroyed(Activity activity) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed();
+    }
 }
